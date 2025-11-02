@@ -23,33 +23,34 @@ export default function Analytics() {
   const { isDemoMode } = useAuth();
 
   useEffect(() => {
+    console.log('📊 Analytics: Component mounted, starting auto-refresh');
     loadAnalytics();
     
     // Set up real-time subscription
     const subscription = supabase
       .channel('count_logs_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'count_logs' }, () => {
-        console.log('📊 Analytics: New data received, refreshing...');
+        console.log('📊 Analytics: New data received from Supabase, refreshing...');
         loadAnalytics();
       })
       .subscribe();
 
-    // Also refresh from localStorage periodically in demo mode
+    // ALWAYS refresh from localStorage every 3 seconds (not just in demo mode)
     const refreshInterval = setInterval(() => {
-      if (isDemoMode) {
-        console.log('🔄 Analytics: Periodic refresh from localStorage');
-        loadAnalytics();
-      }
-    }, 5000); // Refresh every 5 seconds in demo mode
+      console.log('⏰ Analytics: Auto-refresh triggered (3-second interval)');
+      loadAnalytics();
+    }, 3000); // Refresh every 3 seconds
 
     return () => {
+      console.log('📊 Analytics: Component unmounting, cleaning up');
       subscription.unsubscribe();
       clearInterval(refreshInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeRange, isDemoMode]);
+  }, [timeRange]);
 
   const loadAnalytics = async () => {
+    console.log('🔍 Analytics: Loading data...');
     try {
       const now = new Date();
       let startTime: Date;
@@ -64,6 +65,20 @@ export default function Analytics() {
         case 'week':
           startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
           break;
+      }
+
+      // ALWAYS check localStorage first (works in demo mode)
+      const stored = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
+      console.log('📦 Checking localStorage:', stored ? `Found ${JSON.parse(stored).length} logs` : 'No data');
+      
+      if (stored) {
+        const allLogs: CountLog[] = JSON.parse(stored);
+        const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
+        console.log(`✅ Using ${filteredLogs.length} logs from localStorage for time range: ${timeRange}`);
+        if (filteredLogs.length > 0) {
+          processData(filteredLogs);
+          return;
+        }
       }
 
       // Check for table errors
@@ -81,6 +96,8 @@ export default function Analytics() {
         return false;
       };
 
+      // Try Supabase if not in demo mode
+      console.log('🌐 Trying Supabase database...');
       const { data, error } = await supabase
         .from('count_logs')
         .select('*')
@@ -88,81 +105,20 @@ export default function Analytics() {
         .order('timestamp', { ascending: true });
 
       if (error && isTableError(error)) {
-        // Table not found - load from localStorage
-        const stored = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
-        if (stored) {
-          const allLogs: CountLog[] = JSON.parse(stored);
-          const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
-          processData(filteredLogs);
-          return;
-        }
+        console.log('⚠️ Table not found, already checked localStorage');
+        processData([]);
+        return;
       }
 
       if (data && data.length > 0) {
+        console.log(`✅ Loaded ${data.length} logs from Supabase`);
         processData(data);
-        // Save to localStorage in demo mode
-        if (isDemoMode) {
-          const existing = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
-          const existingLogs: CountLog[] = existing ? JSON.parse(existing) : [];
-          const merged = [...existingLogs, ...data.filter((d) => !existingLogs.find((e) => e.id === d.id))];
-          localStorage.setItem(STORAGE_KEY_COUNT_LOGS, JSON.stringify(merged.slice(-1000))); // Keep last 1000
-        }
       } else {
-        // Try loading from localStorage in demo mode
-        if (isDemoMode) {
-          const stored = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
-          if (stored) {
-            const allLogs: CountLog[] = JSON.parse(stored);
-            const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
-            if (filteredLogs.length > 0) {
-              processData(filteredLogs);
-              return;
-            }
-          }
-        }
+        console.log('📭 No data in time range');
         processData([]);
       }
     } catch (error) {
-      // Check if it's a table error
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
-
-      if (isTableError(error)) {
-        // Load from localStorage
-        const stored = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
-        if (stored) {
-          const allLogs: CountLog[] = JSON.parse(stored);
-          const now = new Date();
-          let startTime: Date;
-          switch (timeRange) {
-            case 'hour':
-              startTime = new Date(now.getTime() - 60 * 60 * 1000);
-              break;
-            case 'day':
-              startTime = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-              break;
-            case 'week':
-              startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-              break;
-          }
-          const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
-          processData(filteredLogs);
-          return;
-        }
-      }
-      // Handle other errors gracefully
-      console.log('Demo mode: Analytics data not available');
+      console.error('❌ Analytics error:', error);
       processData([]);
     }
   };
@@ -244,13 +200,24 @@ export default function Analytics() {
           <h2 className="text-2xl font-bold text-white mb-2">Analytics Dashboard</h2>
           <p className="text-slate-400">Track people counting trends and patterns</p>
         </div>
-        <button
-          onClick={exportData}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-        >
-          <Download className="h-4 w-4" />
-          Export CSV
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              console.log('🔄 Manual refresh triggered');
+              loadAnalytics();
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition"
+          >
+            🔄 Refresh
+          </button>
+          <button
+            onClick={exportData}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+          >
+            <Download className="h-4 w-4" />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -324,7 +291,7 @@ export default function Analytics() {
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" />
+              <YAxis stroke="#94a3b8" domain={[0, 'auto']} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: '#1e293b',
@@ -352,7 +319,7 @@ export default function Analytics() {
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="time" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" />
+              <YAxis stroke="#94a3b8" domain={[0, 'auto']} />
               <Tooltip
                 contentStyle={{
                   backgroundColor: '#1e293b',

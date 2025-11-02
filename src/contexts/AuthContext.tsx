@@ -120,8 +120,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       return;
     }
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      // Check if session exists before signing out
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
+      } else {
+        // No session exists, just clear the state
+        setUser(null);
+        setSession(null);
+      }
+    } catch (error) {
+      console.error('Sign out error:', error);
+      // Ensure user state is cleared even if there's an error
+      setUser(null);
+      setSession(null);
+    }
   };
 
   return (

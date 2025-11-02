@@ -26,6 +26,7 @@ export default function LiveFeed() {
   const countInRef = useRef(0);
   const countOutRef = useRef(0);
   const totalCountRef = useRef(0);
+  const lastLogTimeRef = useRef(0);
 
   useEffect(() => {
     loadCameras();
@@ -177,9 +178,16 @@ export default function LiveFeed() {
         drawDetections(canvasRef.current, result.detections, true);
       }
 
-      // Log to database only when there's a crossing event
-      if ((result.countIn > 0 || result.countOut > 0) && selectedCamera) {
+      // Log to database periodically (every 2 seconds) and on crossing events
+      const shouldLog = (result.countIn > 0 || result.countOut > 0) || 
+                       (Date.now() - lastLogTimeRef.current > 2000); // Log every 2 seconds
+      
+      if (shouldLog && selectedCamera) {
+        console.log('📊 SAVING TO DATABASE:', { camera: selectedCamera, in: countInRef.current, out: countOutRef.current, total: totalCountRef.current });
         await logCount(countInRef.current, countOutRef.current, totalCountRef.current);
+        lastLogTimeRef.current = Date.now();
+      } else if (!selectedCamera) {
+        console.warn('⚠️ NO CAMERA SELECTED - Cannot log data. Please select a camera first!');
       }
     } catch (error) {
       console.error('Detection error:', error);
@@ -260,10 +268,13 @@ export default function LiveFeed() {
   };
 
   const logCount = async (currentCountIn: number, currentCountOut: number, currentTotal: number) => {
-    if (!selectedCamera) return;
+    if (!selectedCamera) {
+      console.error('❌ Cannot log: No camera selected');
+      return;
+    }
 
     const countLog = {
-      id: `demo-log-${Date.now()}-${Math.random()}`,
+      id: crypto.randomUUID(),
       camera_id: selectedCamera,
       timestamp: new Date().toISOString(),
       count_in: currentCountIn,
@@ -272,6 +283,8 @@ export default function LiveFeed() {
       detection_data: { timestamp: new Date().toISOString() },
       created_at: new Date().toISOString(),
     };
+
+    console.log('📦 SAVING COUNT LOG:', countLog);
 
     try {
       const { error } = await supabase.from('count_logs').insert(countLog);
@@ -292,18 +305,25 @@ export default function LiveFeed() {
       };
 
       if (error && isTableError(error)) {
+        console.log('⚠️ Table error, saving to localStorage instead');
         // Save to localStorage in demo mode
         const stored = localStorage.getItem('people_counter_count_logs');
         const existingLogs = stored ? JSON.parse(stored) : [];
         existingLogs.push(countLog);
-        // Keep only last 1000 logs
-        localStorage.setItem('people_counter_count_logs', JSON.stringify(existingLogs.slice(-1000)));
+        const updatedLogs = existingLogs.slice(-1000);
+        localStorage.setItem('people_counter_count_logs', JSON.stringify(updatedLogs));
+        console.log(`✅ SAVED TO LOCALSTORAGE! Total logs: ${updatedLogs.length}`);
       } else if (!error) {
+        console.log('✅ Data saved to Supabase successfully');
         // Successfully saved to Supabase, also save to localStorage as backup
         const stored = localStorage.getItem('people_counter_count_logs');
         const existingLogs = stored ? JSON.parse(stored) : [];
         existingLogs.push(countLog);
-        localStorage.setItem('people_counter_count_logs', JSON.stringify(existingLogs.slice(-1000)));
+        const updatedLogs = existingLogs.slice(-1000);
+        localStorage.setItem('people_counter_count_logs', JSON.stringify(updatedLogs));
+        console.log(`✅ Also saved to localStorage as backup. Total logs: ${updatedLogs.length}`);
+      } else {
+        console.error('❌ Error saving to database:', error);
       }
 
       const { data: settings } = await supabase
