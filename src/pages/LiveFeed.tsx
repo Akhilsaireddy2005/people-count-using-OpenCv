@@ -112,7 +112,7 @@ export default function LiveFeed() {
     // Run detection at regular intervals
     intervalRef.current = window.setInterval(async () => {
       await runDetection();
-    }, 250); // Run detection every 250ms for maximum tracking speed
+    }, 200); // Run detection every 200ms for multi-person tracking
   };
 
   const runDetection = async () => {

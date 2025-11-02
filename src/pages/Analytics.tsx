@@ -24,18 +24,30 @@ export default function Analytics() {
 
   useEffect(() => {
     loadAnalytics();
+    
+    // Set up real-time subscription
     const subscription = supabase
       .channel('count_logs_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'count_logs' }, () => {
+        console.log('📊 Analytics: New data received, refreshing...');
         loadAnalytics();
       })
       .subscribe();
 
+    // Also refresh from localStorage periodically in demo mode
+    const refreshInterval = setInterval(() => {
+      if (isDemoMode) {
+        console.log('🔄 Analytics: Periodic refresh from localStorage');
+        loadAnalytics();
+      }
+    }, 5000); // Refresh every 5 seconds in demo mode
+
     return () => {
       subscription.unsubscribe();
+      clearInterval(refreshInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeRange]);
+  }, [timeRange, isDemoMode]);
 
   const loadAnalytics = async () => {
     try {
@@ -156,6 +168,8 @@ export default function Analytics() {
   };
 
   const processData = (logs: CountLog[]) => {
+    console.log(`📊 Processing ${logs.length} log entries for analytics`);
+    
     if (logs.length === 0) {
       setChartData([]);
       setTotalToday(0);
@@ -195,12 +209,16 @@ export default function Analytics() {
       out: Math.round(data.out / data.count),
     }));
 
+    console.log(`📈 Chart updated with ${chartData.length} data points`);
     setChartData(chartData);
 
     const totals = chartData.map((d) => d.total);
-    setTotalToday(logs[logs.length - 1]?.total_count || 0);
+    const latestTotal = logs[logs.length - 1]?.total_count || 0;
+    setTotalToday(latestTotal);
     setPeakCount(Math.max(...totals, 0));
     setAvgCount(Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) || 0);
+    
+    console.log(`📊 Stats: Current=${latestTotal}, Peak=${Math.max(...totals, 0)}, Avg=${Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) || 0}`);
   };
 
   const exportData = () => {

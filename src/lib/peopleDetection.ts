@@ -30,12 +30,12 @@ interface TrackedPerson {
 
 const trackedPeople: Map<string, TrackedPerson> = new Map();
 const CROSSING_LINE_POSITION = 0.5; // Middle of the frame (50%)
-const TRACKING_THRESHOLD = 400; // pixels - extremely large for better tracking
+const TRACKING_THRESHOLD = 450; // pixels - extremely large for better tracking
 const TRACKING_TIMEOUT = 3000; // ms - give lots of time
-const MIN_CONFIDENCE = 0.2; // Ultra ultra low for maximum detection
-const CROSSING_COOLDOWN = 15; // frames - very short cooldown
+const MIN_CONFIDENCE = 0.15; // Ultra ultra low for maximum detection
+const CROSSING_COOLDOWN = 10; // frames - very short cooldown for multi-person
 const CROSSING_THRESHOLD_PERCENT = 0.18; // 18% of frame height
-const MIN_DISTANCE_FOR_CROSSING = 5; // Extremely small - catch any movement
+const MIN_DISTANCE_FOR_CROSSING = 3; // Extremely small - catch any movement
 
 /**
  * Load the COCO-SSD model with better configuration
@@ -113,16 +113,21 @@ function calculateIoU(
 
 /**
  * Find closest tracked person using both distance and IoU with better scoring
+ * Now returns all potential matches to handle multiple people better
  */
 function findClosestPerson(
   bbox: [number, number, number, number],
   centerX: number,
-  centerY: number
+  centerY: number,
+  excludeIds: Set<string>
 ): TrackedPerson | null {
   let closest: TrackedPerson | null = null;
-  let maxScore = 0.3; // Minimum score threshold to match
+  let maxScore = 0.25; // Lower threshold for better multi-person tracking
 
   trackedPeople.forEach((person) => {
+    // Skip already matched people
+    if (excludeIds.has(person.id)) return;
+    
     // Calculate distance score
     const distance = calculateDistance(centerX, centerY, person.centerX, person.centerY);
     if (distance > TRACKING_THRESHOLD) return;
@@ -205,13 +210,15 @@ export async function detectPeopleWithCrossing(
   const sortedDetections = [...result.detections].sort((a, b) => b.score - a.score);
   
   // Process each detected person
+  console.log(`📸 DETECTION FRAME: Found ${sortedDetections.length} people | Already tracking: ${trackedPeople.size}`);
+  
   sortedDetections.forEach((detection) => {
     const [x, y, width, height] = detection.bbox;
     const centerX = x + width / 2;
     const centerY = y + height / 2;
     
     // Try to find if this person was already being tracked
-    const existingPerson = findClosestPerson(detection.bbox, centerX, centerY);
+    const existingPerson = findClosestPerson(detection.bbox, centerX, centerY, matchedPeople);
     
     if (existingPerson && !matchedPeople.has(existingPerson.id)) {
       // Mark this person as matched
