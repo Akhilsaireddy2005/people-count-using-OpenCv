@@ -112,29 +112,46 @@ export default function LiveFeed() {
     // Run detection at regular intervals
     intervalRef.current = window.setInterval(async () => {
       await runDetection();
-    }, 400); // Run detection every 400ms for better tracking of multiple people
+    }, 250); // Run detection every 250ms for maximum tracking speed
   };
 
   const runDetection = async () => {
     try {
-      let videoElement: HTMLVideoElement | HTMLImageElement | null = null;
+      let videoElement: HTMLVideoElement | null = null;
       let frameHeight = 0;
+      let frameWidth = 0;
 
       // Get the appropriate video element based on source
       if (videoSource === 'webcam' && webcamRef.current && webcamRef.current.video) {
         videoElement = webcamRef.current.video;
         frameHeight = webcamRef.current.video.videoHeight;
+        frameWidth = webcamRef.current.video.videoWidth;
       } else if ((videoSource === 'upload' || videoSource === 'stream') && videoRef.current) {
         videoElement = videoRef.current;
         frameHeight = videoRef.current.videoHeight;
+        frameWidth = videoRef.current.videoWidth;
       }
 
-      if (!videoElement || frameHeight === 0) {
+      // Check if video is ready and has valid dimensions
+      if (!videoElement || frameHeight === 0 || frameWidth === 0) {
+        console.log('Waiting for video to be ready...', { videoElement: !!videoElement, frameHeight, frameWidth, videoSource });
+        return;
+      }
+
+      // Check if video is actually playing for uploaded videos
+      if ((videoSource === 'upload' || videoSource === 'stream') && videoElement.paused) {
+        console.log('Video is paused, attempting to play...');
+        videoElement.play().catch(err => console.warn('Could not play video:', err));
         return;
       }
 
       // Run detection
       const result = await detectPeopleWithCrossing(videoElement, frameHeight);
+      
+      // Log detection results
+      if (result.peopleCount > 0) {
+        console.log(`👤 Detected ${result.peopleCount} people | countIn: ${result.countIn} | countOut: ${result.countOut}`);
+      }
       
       // Update counts only if there were actual crossings
       if (result.countIn > 0) {
@@ -155,8 +172,8 @@ export default function LiveFeed() {
 
       // Draw detections on canvas
       if (canvasRef.current && videoElement) {
-        canvasRef.current.width = videoElement.videoWidth || videoElement.width;
-        canvasRef.current.height = videoElement.videoHeight || videoElement.height;
+        canvasRef.current.width = frameWidth;
+        canvasRef.current.height = frameHeight;
         drawDetections(canvasRef.current, result.detections, true);
       }
 
@@ -190,6 +207,20 @@ export default function LiveFeed() {
       setVideoSource('upload');
       // Reset counts when switching video source
       resetCount();
+      
+      // Wait for video to load metadata
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current.addEventListener('loadedmetadata', () => {
+            console.log('Video loaded:', {
+              width: videoRef.current?.videoWidth,
+              height: videoRef.current?.videoHeight,
+              duration: videoRef.current?.duration
+            });
+          }, { once: true });
+        }
+      }, 100);
     } else {
       alert('Please select a valid video file');
     }
@@ -375,7 +406,7 @@ export default function LiveFeed() {
             <ArrowRight className="h-5 w-5 text-green-100" />
           </div>
           <p className="text-4xl font-bold">{countIn}</p>
-          <p className="text-xs text-green-100 mt-1">↓ Crossing down</p>
+          <p className="text-xs text-green-100 mt-1">Entered from Entry Zone</p>
         </div>
 
         <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-2xl p-6 text-white shadow-lg">
@@ -384,7 +415,7 @@ export default function LiveFeed() {
             <ArrowLeft className="h-5 w-5 text-red-100" />
           </div>
           <p className="text-4xl font-bold">{countOut}</p>
-          <p className="text-xs text-red-100 mt-1">↑ Crossing up</p>
+          <p className="text-xs text-red-100 mt-1">Exited from Exit Zone</p>
         </div>
 
         <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg">
@@ -393,7 +424,7 @@ export default function LiveFeed() {
             <Users className="h-5 w-5 text-blue-100" />
           </div>
           <p className="text-4xl font-bold">{totalCount}</p>
-          <p className="text-xs text-blue-100 mt-1">In - Out = Total</p>
+          <p className="text-xs text-blue-100 mt-1">People inside area</p>
         </div>
       </div>
 
@@ -579,6 +610,20 @@ export default function LiveFeed() {
                 className="w-full h-full object-contain"
                 loop={false}
                 muted
+                playsInline
+                preload="auto"
+                onLoadedMetadata={(e) => {
+                  const video = e.currentTarget;
+                  console.log('Video metadata loaded:', {
+                    width: video.videoWidth,
+                    height: video.videoHeight,
+                    duration: video.duration
+                  });
+                }}
+                onError={(e) => {
+                  console.error('Video error:', e);
+                  alert('Error loading video. Please try another file.');
+                }}
               />
               {/* Detection overlay canvas */}
               <canvas

@@ -30,12 +30,12 @@ interface TrackedPerson {
 
 const trackedPeople: Map<string, TrackedPerson> = new Map();
 const CROSSING_LINE_POSITION = 0.5; // Middle of the frame (50%)
-const TRACKING_THRESHOLD = 200; // pixels - increased for better tracking
-const TRACKING_TIMEOUT = 1500; // ms - shorter timeout for better cleanup
-const MIN_CONFIDENCE = 0.45; // Slightly lower for better detection
-const CROSSING_COOLDOWN = 60; // frames to wait before allowing another crossing
-const CROSSING_THRESHOLD_PERCENT = 0.12; // 12% of frame height for crossing zone
-const MIN_DISTANCE_FOR_CROSSING = 30; // Minimum pixels moved to count as crossing
+const TRACKING_THRESHOLD = 400; // pixels - extremely large for better tracking
+const TRACKING_TIMEOUT = 3000; // ms - give lots of time
+const MIN_CONFIDENCE = 0.2; // Ultra ultra low for maximum detection
+const CROSSING_COOLDOWN = 15; // frames - very short cooldown
+const CROSSING_THRESHOLD_PERCENT = 0.18; // 18% of frame height
+const MIN_DISTANCE_FOR_CROSSING = 5; // Extremely small - catch any movement
 
 /**
  * Load the COCO-SSD model with better configuration
@@ -181,7 +181,6 @@ export async function detectPeopleWithCrossing(
   let countOut = 0;
   
   const crossingLineY = frameHeight * CROSSING_LINE_POSITION;
-  const crossingThreshold = frameHeight * CROSSING_THRESHOLD_PERCENT;
   
   // Clean up old tracked people
   cleanupTrackedPeople();
@@ -227,44 +226,58 @@ export async function detectPeopleWithCrossing(
       existingPerson.centerY = centerY;
       existingPerson.lastSeen = Date.now();
       
+      // Log position tracking
+      const currentZone = centerY < crossingLineY ? 'EXIT' : 'ENTRY';
+      const previousZone = previousY < crossingLineY ? 'EXIT' : 'ENTRY';
+      if (currentZone !== previousZone) {
+        console.log(`🔄 ZONE CHANGE! ID: ${existingPerson.id.substring(0, 8)} | ${previousZone}(${previousY.toFixed(0)}) → ${currentZone}(${centerY.toFixed(0)}) | Crossing: ${existingPerson.crossed}`);
+      }
+      
       // Check if person crossed the line (only if not in cooldown)
       if (!existingPerson.crossed) {
-        // Define upper and lower boundaries of crossing zone
-        const upperBoundary = crossingLineY - crossingThreshold;
-        const lowerBoundary = crossingLineY + crossingThreshold;
+        // Simpler crossing logic - check if crossed the center line
+        const crossedDown = previousY < crossingLineY && centerY > crossingLineY;
+        const crossedUp = previousY > crossingLineY && centerY < crossingLineY;
         
-        // Calculate vertical distance moved
+        // Calculate movement
         const verticalMovement = Math.abs(centerY - previousY);
         const horizontalMovement = Math.abs(centerX - previousCenterX);
         
-        // Only count if person moved significantly (not just detection jitter)
-        if (verticalMovement > MIN_DISTANCE_FOR_CROSSING) {
-          // Check for downward crossing (entering)
-          const wasAboveLine = previousY < upperBoundary;
-          const isBelowLine = centerY > lowerBoundary;
-          
-          // Check for upward crossing (exiting)
-          const wasBelowLine = previousY > lowerBoundary;
-          const isAboveLine = centerY < upperBoundary;
-          
-          // Ensure movement is primarily vertical (not diagonal wandering)
-          const isVerticalMovement = verticalMovement > horizontalMovement * 0.5;
-          
-          if (wasAboveLine && isBelowLine && isVerticalMovement) {
-            // Crossed from top to bottom (entering)
+        // Log all potential crossings for debugging
+        if (crossedDown || crossedUp) {
+          console.log(`🔍 POTENTIAL CROSSING DETECTED:`, {
+            id: existingPerson.id.substring(0, 8),
+            direction: crossedDown ? 'DOWN (Exit→Entry)' : 'UP (Entry→Exit)',
+            previousY: previousY.toFixed(0),
+            currentY: centerY.toFixed(0),
+            crossingLine: crossingLineY.toFixed(0),
+            verticalMove: verticalMovement.toFixed(0),
+            horizontalMove: horizontalMovement.toFixed(0),
+            minRequired: MIN_DISTANCE_FOR_CROSSING
+          });
+        }
+        
+        // Check if movement is primarily vertical (very lenient)
+        const isVerticalMovement = verticalMovement > horizontalMovement * 0.1;
+        
+        if (verticalMovement > MIN_DISTANCE_FOR_CROSSING && isVerticalMovement) {
+          if (crossedDown) {
+            // Crossed from EXIT ZONE (top/red) to ENTRY ZONE (bottom/green) = ENTERING
             existingPerson.direction = 'in';
             existingPerson.crossed = true;
             existingPerson.framesSinceCrossing = 0;
             countIn++;
-            console.log(`✅ PERSON ENTERED - ID: ${existingPerson.id.substring(0, 12)}... | Y: ${previousY.toFixed(0)} → ${centerY.toFixed(0)} | Moved: ${verticalMovement.toFixed(0)}px | Line: ${crossingLineY.toFixed(0)}`);
-          } else if (wasBelowLine && isAboveLine && isVerticalMovement) {
-            // Crossed from bottom to top (exiting)
+            console.log(`✅✅✅ COUNTED IN! Person crossed DOWN (Exit→Entry) - ID: ${existingPerson.id.substring(0, 8)} | Y: ${previousY.toFixed(0)}→${centerY.toFixed(0)} | Movement: ${verticalMovement.toFixed(0)}px | Line: ${crossingLineY.toFixed(0)}`);
+          } else if (crossedUp) {
+            // Crossed from ENTRY ZONE (bottom/green) to EXIT ZONE (top/red) = EXITING
             existingPerson.direction = 'out';
             existingPerson.crossed = true;
             existingPerson.framesSinceCrossing = 0;
             countOut++;
-            console.log(`❌ PERSON EXITED - ID: ${existingPerson.id.substring(0, 12)}... | Y: ${previousY.toFixed(0)} → ${centerY.toFixed(0)} | Moved: ${verticalMovement.toFixed(0)}px | Line: ${crossingLineY.toFixed(0)}`);
+            console.log(`❌❌❌ COUNTED OUT! Person crossed UP (Entry→Exit) - ID: ${existingPerson.id.substring(0, 8)} | Y: ${previousY.toFixed(0)}→${centerY.toFixed(0)} | Movement: ${verticalMovement.toFixed(0)}px | Line: ${crossingLineY.toFixed(0)}`);
           }
+        } else if (crossedDown || crossedUp) {
+          console.log(`⚠️ CROSSING REJECTED - Movement too small or not vertical enough`);
         }
       }
     } else if (!existingPerson) {
@@ -283,7 +296,8 @@ export async function detectPeopleWithCrossing(
       };
       trackedPeople.set(id, newPerson);
       matchedPeople.add(id);
-      console.log(`🆕 NEW PERSON - ID: ${id.substring(0, 12)}... | Position Y: ${centerY.toFixed(0)} | Confidence: ${Math.round(detection.score * 100)}%`);
+      const zonePosition = centerY < crossingLineY ? 'EXIT ZONE (top)' : 'ENTRY ZONE (bottom)';
+      console.log(`🆕 NEW PERSON DETECTED - ID: ${id.substring(0, 8)} | Y: ${centerY.toFixed(0)} | In: ${zonePosition} | Confidence: ${Math.round(detection.score * 100)}%`);
     }
   });
   
@@ -404,62 +418,7 @@ export function drawDetections(
     ctx.fillText('CROSSING LINE', 15, lineY - 10);
   }
 
-  // Draw bounding boxes
-  detections.forEach((detection, index) => {
-    const [x, y, width, height] = detection.bbox;
-    
-    // Draw box with thicker border
-    ctx.strokeStyle = '#10b981';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, width, height);
-    
-    // Draw center point
-    const centerX = x + width / 2;
-    const centerY = y + height / 2;
-    ctx.fillStyle = '#10b981';
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 6, 0, 2 * Math.PI);
-    ctx.fill();
-    
-    // Draw vertical line from center to show position relative to crossing line
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.lineTo(centerX, canvas.height * CROSSING_LINE_POSITION);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    // Draw label background with shadow
-    const label = `Person ${index + 1} - ${Math.round(detection.score * 100)}%`;
-    ctx.font = 'bold 14px Arial';
-    const textWidth = ctx.measureText(label).width;
-    
-    // Shadow
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-    ctx.fillRect(x + 2, y - 27, textWidth + 12, 27);
-    
-    // Background
-    ctx.fillStyle = '#10b981';
-    ctx.fillRect(x, y - 25, textWidth + 10, 25);
-    
-    // Label text
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(label, x + 5, y - 7);
-  });
-  
-  // Draw detection count
-  if (detections.length > 0) {
-    ctx.font = 'bold 20px Arial';
-    ctx.fillStyle = '#000000';
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    const countText = `Detected: ${detections.length} ${detections.length === 1 ? 'person' : 'people'}`;
-    ctx.strokeText(countText, 15, 35);
-    ctx.fillStyle = '#10b981';
-    ctx.fillText(countText, 15, 35);
-  }
+  // Don't draw bounding boxes - removed all detection box drawing code
 }
 
 /**
