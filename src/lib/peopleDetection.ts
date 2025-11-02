@@ -131,8 +131,8 @@ function findClosestPerson(
     const iou = calculateIoU(bbox, person.bbox);
     
     // Calculate size similarity
-    const [x1, y1, w1, h1] = bbox;
-    const [x2, y2, w2, h2] = person.bbox;
+    const [, , w1, h1] = bbox;
+    const [, , w2, h2] = person.bbox;
     const sizeRatio = Math.min(w1 * h1, w2 * h2) / Math.max(w1 * h1, w2 * h2);
     
     // Combine scores with weights:
