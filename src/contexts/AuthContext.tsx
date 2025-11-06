@@ -66,8 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Send email verification
-      await sendEmailVerification(userCredential.user);
+      // Send email verification with action URL
+      const actionCodeSettings = {
+        url: 'https://people-counter-app-aec5b.web.app/login',
+        handleCodeInApp: false,
+      };
+      
+      await sendEmailVerification(userCredential.user, actionCodeSettings);
       
       // Sign out the user immediately after signup
       await firebaseSignOut(auth);
@@ -76,6 +81,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('Account created! Please check your email and verify your account before signing in.');
     } catch (error: any) {
       console.error('Sign up error:', error);
+      // If account was created but email failed to send
+      if (error.code === 'auth/email-already-in-use') {
+        throw new Error('This email is already registered. Please sign in or use forgot password.');
+      }
       throw new Error(error.message || 'Failed to sign up');
     }
   };
