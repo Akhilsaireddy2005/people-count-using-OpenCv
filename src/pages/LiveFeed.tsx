@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { Play, Pause, Camera, Users, ArrowRight, ArrowLeft, Upload, Video } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { localStorageService } from '../lib/localStorage';
 import { loadModel, detectPeopleWithCrossing, drawDetections, resetTracking } from '../lib/peopleDetection';
 
 type VideoSource = 'webcam' | 'upload' | 'stream';
@@ -49,43 +49,22 @@ export default function LiveFeed() {
 
   const loadCameras = async () => {
     try {
-      const { data, error } = await supabase.from('cameras').select('id, name').eq('is_active', true);
-      if (!error && data && data.length > 0) {
-        setCameras(data);
-        setSelectedCamera(data[0].id);
+      const cameras = localStorageService.getCameras();
+      const activeCameras = cameras
+        .filter(cam => cam.is_active)
+        .map(cam => ({ id: cam.id, name: cam.name }));
+      
+      if (activeCameras.length > 0) {
+        setCameras(activeCameras);
+        setSelectedCamera(activeCameras[0].id);
       } else {
-        // Try loading from localStorage in demo mode
-        const stored = localStorage.getItem('people_counter_cameras');
-        if (stored) {
-          const storedCameras = JSON.parse(stored);
-          const activeCameras = storedCameras
-            .filter((cam: { is_active: boolean }) => cam.is_active)
-            .map((cam: { id: string; name: string }) => ({ id: cam.id, name: cam.name }));
-          if (activeCameras.length > 0) {
-            setCameras(activeCameras);
-            setSelectedCamera(activeCameras[0].id);
-            return;
-          }
-        }
         // Fallback: add a default camera
         const demoCamera = { id: 'demo-camera', name: 'Demo Camera' };
         setCameras([demoCamera]);
         setSelectedCamera(demoCamera.id);
       }
-    } catch {
-      // Try loading from localStorage in demo mode
-      const stored = localStorage.getItem('people_counter_cameras');
-      if (stored) {
-        const storedCameras = JSON.parse(stored);
-        const activeCameras = storedCameras
-          .filter((cam: { is_active: boolean }) => cam.is_active)
-          .map((cam: { id: string; name: string }) => ({ id: cam.id, name: cam.name }));
-        if (activeCameras.length > 0) {
-          setCameras(activeCameras);
-          setSelectedCamera(activeCameras[0].id);
-          return;
-        }
-      }
+    } catch (error) {
+      console.error('Error loading cameras:', error);
       // Fallback: add a default camera
       const demoCamera = { id: 'demo-camera', name: 'Demo Camera' };
       setCameras([demoCamera]);
@@ -274,77 +253,36 @@ export default function LiveFeed() {
     }
 
     const countLog = {
-      id: crypto.randomUUID(),
       camera_id: selectedCamera,
       timestamp: new Date().toISOString(),
       count_in: currentCountIn,
       count_out: currentCountOut,
       total_count: currentTotal,
       detection_data: { timestamp: new Date().toISOString() },
-      created_at: new Date().toISOString(),
     };
 
     console.log('📦 SAVING COUNT LOG:', countLog);
 
     try {
-      const { error } = await supabase.from('count_logs').insert(countLog);
+      localStorageService.addCountLog(countLog);
+      console.log('✅ Data saved successfully');
 
-      // Check for table errors
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
-
-      if (error && isTableError(error)) {
-        console.log('⚠️ Table error, saving to localStorage instead');
-        // Save to localStorage in demo mode
-        const stored = localStorage.getItem('people_counter_count_logs');
-        const existingLogs = stored ? JSON.parse(stored) : [];
-        existingLogs.push(countLog);
-        const updatedLogs = existingLogs.slice(-1000);
-        localStorage.setItem('people_counter_count_logs', JSON.stringify(updatedLogs));
-        console.log(`✅ SAVED TO LOCALSTORAGE! Total logs: ${updatedLogs.length}`);
-      } else if (!error) {
-        console.log('✅ Data saved to Supabase successfully');
-        // Successfully saved to Supabase, also save to localStorage as backup
-        const stored = localStorage.getItem('people_counter_count_logs');
-        const existingLogs = stored ? JSON.parse(stored) : [];
-        existingLogs.push(countLog);
-        const updatedLogs = existingLogs.slice(-1000);
-        localStorage.setItem('people_counter_count_logs', JSON.stringify(updatedLogs));
-        console.log(`✅ Also saved to localStorage as backup. Total logs: ${updatedLogs.length}`);
-      } else {
-        console.error('❌ Error saving to database:', error);
-      }
-
-      const { data: settings } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('camera_id', selectedCamera)
-        .maybeSingle();
-
-      if (settings?.alert_enabled && currentTotal > settings.threshold_limit) {
-        await supabase.from('alerts').insert({
+      // Check for alerts
+      const setting = localStorageService.getSettingByCameraId(selectedCamera);
+      if (setting?.alert_enabled && currentTotal > setting.threshold_limit) {
+        localStorageService.addAlert({
           camera_id: selectedCamera,
+          triggered_at: new Date().toISOString(),
           count_value: currentTotal,
-          threshold_value: settings.threshold_limit,
+          threshold_value: setting.threshold_limit,
+          acknowledged: false,
+          acknowledged_by: null,
+          acknowledged_at: null,
         });
+        console.log('🚨 Alert triggered!');
       }
-    } catch {
-      // Save to localStorage in demo mode
-      const stored = localStorage.getItem('people_counter_count_logs');
-      const existingLogs = stored ? JSON.parse(stored) : [];
-      existingLogs.push(countLog);
-      localStorage.setItem('people_counter_count_logs', JSON.stringify(existingLogs.slice(-1000)));
+    } catch (error) {
+      console.error('❌ Error saving count log:', error);
     }
   };
 

@@ -348,7 +348,7 @@ export async function detectPeopleWithCrossing(
  */
 export function drawDetections(
   canvas: HTMLCanvasElement,
-  detections: Detection[],
+  _detections: Detection[],
   showCrossingLine = true
 ): void {
   const ctx = canvas.getContext('2d');

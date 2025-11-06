@@ -3,7 +3,7 @@ import { Activity, Video, BarChart3, Settings, Bell, LogOut } from 'lucide-react
 import { useAuth } from '../hooks/useAuth';
 
 export default function DashboardLayout() {
-  const { user, signOut, isDemoMode } = useAuth();
+  const { user, signOut } = useAuth();
 
   const navigation = [
     { name: 'Live Feed', to: '/dashboard', icon: Video, end: true },
@@ -64,13 +64,6 @@ export default function DashboardLayout() {
         </aside>
 
         <main className="flex-1 overflow-y-auto bg-slate-900">
-          {isDemoMode && (
-            <div className="bg-yellow-500/10 border-b border-yellow-500/30 px-6 py-3">
-              <p className="text-yellow-400 text-sm">
-                <strong>Demo Mode:</strong> Supabase is not configured. Data is not persisted. To enable full functionality, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in a .env file.
-              </p>
-            </div>
-          )}
           <Outlet />
         </main>
       </div>

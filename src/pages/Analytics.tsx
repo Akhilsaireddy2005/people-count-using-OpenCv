@@ -1,11 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, Calendar, Download } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import type { CountLog } from '../lib/supabase';
-import { useAuth } from '../hooks/useAuth';
-
-const STORAGE_KEY_COUNT_LOGS = 'people_counter_count_logs';
+import { localStorageService, type CountLog } from '../lib/localStorage';
 
 type ChartData = {
   time: string;
@@ -20,30 +16,19 @@ export default function Analytics() {
   const [totalToday, setTotalToday] = useState(0);
   const [peakCount, setPeakCount] = useState(0);
   const [avgCount, setAvgCount] = useState(0);
-  const { isDemoMode } = useAuth();
 
   useEffect(() => {
     console.log('📊 Analytics: Component mounted, starting auto-refresh');
     loadAnalytics();
     
-    // Set up real-time subscription
-    const subscription = supabase
-      .channel('count_logs_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'count_logs' }, () => {
-        console.log('📊 Analytics: New data received from Supabase, refreshing...');
-        loadAnalytics();
-      })
-      .subscribe();
-
-    // ALWAYS refresh from localStorage every 3 seconds (not just in demo mode)
+    // Refresh data every 3 seconds
     const refreshInterval = setInterval(() => {
       console.log('⏰ Analytics: Auto-refresh triggered (3-second interval)');
       loadAnalytics();
-    }, 3000); // Refresh every 3 seconds
+    }, 3000);
 
     return () => {
       console.log('📊 Analytics: Component unmounting, cleaning up');
-      subscription.unsubscribe();
       clearInterval(refreshInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -67,56 +52,11 @@ export default function Analytics() {
           break;
       }
 
-      // ALWAYS check localStorage first (works in demo mode)
-      const stored = localStorage.getItem(STORAGE_KEY_COUNT_LOGS);
-      console.log('📦 Checking localStorage:', stored ? `Found ${JSON.parse(stored).length} logs` : 'No data');
-      
-      if (stored) {
-        const allLogs: CountLog[] = JSON.parse(stored);
-        const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
-        console.log(`✅ Using ${filteredLogs.length} logs from localStorage for time range: ${timeRange}`);
-        if (filteredLogs.length > 0) {
-          processData(filteredLogs);
-          return;
-        }
-      }
-
-      // Check for table errors
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
-
-      // Try Supabase if not in demo mode
-      console.log('🌐 Trying Supabase database...');
-      const { data, error } = await supabase
-        .from('count_logs')
-        .select('*')
-        .gte('timestamp', startTime.toISOString())
-        .order('timestamp', { ascending: true });
-
-      if (error && isTableError(error)) {
-        console.log('⚠️ Table not found, already checked localStorage');
-        processData([]);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        console.log(`✅ Loaded ${data.length} logs from Supabase`);
-        processData(data);
-      } else {
-        console.log('📭 No data in time range');
-        processData([]);
-      }
+      // Get all logs from localStorage
+      const allLogs = localStorageService.getCountLogs();
+      const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
+      console.log(`✅ Using ${filteredLogs.length} logs for time range: ${timeRange}`);
+      processData(filteredLogs);
     } catch (error) {
       console.error('❌ Analytics error:', error);
       processData([]);

@@ -1,11 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { Camera, Plus, Trash2, Settings as SettingsIcon } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import type { Camera as CameraType, Setting } from '../lib/supabase';
+import { localStorageService, type Camera as CameraType, type Setting } from '../lib/localStorage';
 import { useAuth } from '../hooks/useAuth';
-
-const STORAGE_KEY_CAMERAS = 'people_counter_cameras';
-const STORAGE_KEY_SETTINGS = 'people_counter_settings';
 
 export default function Settings() {
   const [cameras, setCameras] = useState<CameraType[]>([]);
@@ -15,7 +11,7 @@ export default function Settings() {
   const [showAddCamera, setShowAddCamera] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const { user, isDemoMode } = useAuth();
+  const { user } = useAuth();
 
   useEffect(() => {
     loadData();
@@ -23,87 +19,13 @@ export default function Settings() {
 
   const loadData = async () => {
     try {
-      const { data: camerasData, error: camerasError } = await supabase.from('cameras').select('*').order('created_at');
-      const { data: settingsData, error: settingsError } = await supabase.from('settings').select('*');
-
-      // Check for table not found errors
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
-
-      // If table not found, switch to demo mode
-      if ((camerasError && isTableError(camerasError)) || (settingsError && isTableError(settingsError))) {
-        console.warn('Database tables not found. Switching to demo mode.');
-        localStorage.setItem('supabase_invalid_key', 'true');
-        // Load from localStorage
-        const storedCameras = localStorage.getItem(STORAGE_KEY_CAMERAS);
-        const storedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
-        if (storedCameras) setCameras(JSON.parse(storedCameras));
-        if (storedSettings) setSettings(JSON.parse(storedSettings));
-        return;
-      }
-
-      if (camerasData) {
-        setCameras(camerasData);
-        // Also save to localStorage for demo mode
-        if (isDemoMode) {
-          localStorage.setItem(STORAGE_KEY_CAMERAS, JSON.stringify(camerasData));
-        }
-      } else if (isDemoMode) {
-        // Load from localStorage in demo mode
-        const stored = localStorage.getItem(STORAGE_KEY_CAMERAS);
-        if (stored) {
-          setCameras(JSON.parse(stored));
-        }
-      }
-
-      if (settingsData) {
-        setSettings(settingsData);
-        if (isDemoMode) {
-          localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settingsData));
-        }
-      } else if (isDemoMode) {
-        const stored = localStorage.getItem(STORAGE_KEY_SETTINGS);
-        if (stored) {
-          setSettings(JSON.parse(stored));
-        }
-      }
+      const camerasData = localStorageService.getCameras();
+      const settingsData = localStorageService.getSettings();
+      
+      setCameras(camerasData);
+      setSettings(settingsData);
     } catch (error) {
-      // Check if it's a table not found error
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
-
-      if (isTableError(error)) {
-        console.warn('Database tables not found. Switching to demo mode.');
-        localStorage.setItem('supabase_invalid_key', 'true');
-      }
-
-      // Handle fetch errors - try loading from localStorage
-      const storedCameras = localStorage.getItem(STORAGE_KEY_CAMERAS);
-      const storedSettings = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (storedCameras) setCameras(JSON.parse(storedCameras));
-      if (storedSettings) setSettings(JSON.parse(storedSettings));
+      console.error('Error loading data:', error);
     }
   };
 
@@ -123,96 +45,30 @@ export default function Settings() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('cameras')
-        .insert({
-          name: newCameraName.trim(),
-          location: newCameraLocation.trim(),
-          is_active: true,
-          created_by: user?.id,
-        })
-        .select()
-        .single();
+      const newCamera = localStorageService.addCamera({
+        name: newCameraName.trim(),
+        location: newCameraLocation.trim(),
+        stream_url: null,
+        is_active: true,
+        created_by: user?.id || null,
+      });
 
-      // Check if it's a table not found error
-      const isTableError = (err: unknown): boolean => {
-        if (err && typeof err === 'object') {
-          const error = err as { message?: string; code?: string };
-          const message = error.message?.toLowerCase() || '';
-          return (
-            message.includes('could not find the table') ||
-            message.includes('schema cache') ||
-            message.includes('relation') && message.includes('does not exist') ||
-            error.code === 'PGRST116'
-          );
-        }
-        return false;
-      };
+      // Create default settings
+      localStorageService.addSetting({
+        camera_id: newCamera.id,
+        threshold_limit: 50,
+        alert_enabled: true,
+        alert_email: null,
+        alert_sound: true,
+        updated_by: user?.id || null,
+      });
 
-      if (error && isTableError(error)) {
-        console.warn('Database tables not found. Switching to demo mode.');
-        localStorage.setItem('supabase_invalid_key', 'true');
-        // Fall through to demo mode logic
-      } else if (!error && data) {
-        // Create default settings
-        await supabase.from('settings').insert({
-          camera_id: data.id,
-          threshold_limit: 50,
-          alert_enabled: true,
-          alert_sound: true,
-          updated_by: user?.id,
-        });
-
-        setNewCameraName('');
-        setNewCameraLocation('');
-        setShowAddCamera(false);
-        setSaveMessage('Camera added successfully!');
-        setTimeout(() => setSaveMessage(''), 3000);
-        loadData();
-        return;
-      }
-
-      // Demo mode or table error: create camera in localStorage
-      if (isDemoMode || (error && isTableError(error))) {
-        // Demo mode: create camera in localStorage
-        const newCamera: CameraType = {
-          id: `demo-camera-${Date.now()}`,
-          name: newCameraName.trim(),
-          location: newCameraLocation.trim(),
-          stream_url: null,
-          is_active: true,
-          created_by: user?.id || null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        const newSetting: Setting = {
-          id: `demo-setting-${Date.now()}`,
-          camera_id: newCamera.id,
-          threshold_limit: 50,
-          alert_enabled: true,
-          alert_email: null,
-          alert_sound: true,
-          updated_by: user?.id || null,
-          updated_at: new Date().toISOString(),
-        };
-
-        const updatedCameras = [...cameras, newCamera];
-        const updatedSettings = [...settings, newSetting];
-
-        setCameras(updatedCameras);
-        setSettings(updatedSettings);
-        localStorage.setItem(STORAGE_KEY_CAMERAS, JSON.stringify(updatedCameras));
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updatedSettings));
-
-        setNewCameraName('');
-        setNewCameraLocation('');
-        setShowAddCamera(false);
-        setSaveMessage('Camera added successfully!');
-        setTimeout(() => setSaveMessage(''), 3000);
-      } else {
-        setErrorMessage(error?.message || 'Failed to add camera');
-      }
+      setNewCameraName('');
+      setNewCameraLocation('');
+      setShowAddCamera(false);
+      setSaveMessage('Camera added successfully!');
+      setTimeout(() => setSaveMessage(''), 3000);
+      loadData();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'An error occurred while adding camera');
     }
@@ -220,18 +76,8 @@ export default function Settings() {
 
   const deleteCamera = async (cameraId: string) => {
     try {
-      const { error } = await supabase.from('cameras').delete().eq('id', cameraId);
-      if (!error) {
-        loadData();
-      } else if (isDemoMode) {
-        // Demo mode: delete from localStorage
-        const updatedCameras = cameras.filter((cam) => cam.id !== cameraId);
-        const updatedSettings = settings.filter((set) => set.camera_id !== cameraId);
-        setCameras(updatedCameras);
-        setSettings(updatedSettings);
-        localStorage.setItem(STORAGE_KEY_CAMERAS, JSON.stringify(updatedCameras));
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updatedSettings));
-      }
+      localStorageService.deleteCamera(cameraId);
+      loadData();
     } catch (error) {
       console.error('Error deleting camera:', error);
     }
@@ -243,101 +89,22 @@ export default function Settings() {
       const existingSetting = settings.find((s) => s.camera_id === cameraId);
 
       if (existingSetting) {
-        const { error } = await supabase
-          .from('settings')
-          .update({ [field]: value, updated_by: user?.id })
-          .eq('id', existingSetting.id);
-        
-        // Check for table not found errors
-        const isTableError = (err: unknown): boolean => {
-          if (err && typeof err === 'object') {
-            const error = err as { message?: string; code?: string };
-            const message = error.message?.toLowerCase() || '';
-            return (
-              message.includes('could not find the table') ||
-              message.includes('schema cache') ||
-              message.includes('relation') && message.includes('does not exist') ||
-              error.code === 'PGRST116'
-            );
-          }
-          return false;
-        };
-
-        if (error && isTableError(error)) {
-          console.warn('Database tables not found. Using demo mode.');
-          localStorage.setItem('supabase_invalid_key', 'true');
-        } else if (error && !isDemoMode) {
-          setErrorMessage('Failed to update setting');
-          setTimeout(() => setErrorMessage(''), 3000);
-          return;
-        }
-
-        // Update in localStorage for demo mode or if table error
-        if (isDemoMode || (error && isTableError(error))) {
-          const updatedSettings = settings.map((s) =>
-            s.id === existingSetting.id
-              ? { ...s, [field]: value, updated_by: user?.id || null, updated_at: new Date().toISOString() }
-              : s
-          );
-          setSettings(updatedSettings);
-          localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updatedSettings));
-        } else if (!error) {
-          // Reload from database if successful
-          loadData();
-        }
-      } else {
-        const { error } = await supabase.from('settings').insert({
-          camera_id: cameraId,
+        localStorageService.updateSetting(existingSetting.id, {
           [field]: value,
-          threshold_limit: field === 'threshold_limit' ? value as number : 50,
-          alert_enabled: field === 'alert_enabled' ? value as boolean : true,
-          alert_email: field === 'alert_email' ? (value as string | null) : null,
-          alert_sound: field === 'alert_sound' ? value as boolean : true,
-          updated_by: user?.id,
+          updated_by: user?.id || null,
         });
-
-        // Check for table not found errors
-        const isTableError = (err: unknown): boolean => {
-          if (err && typeof err === 'object') {
-            const error = err as { message?: string; code?: string };
-            const message = error.message?.toLowerCase() || '';
-            return (
-              message.includes('could not find the table') ||
-              message.includes('schema cache') ||
-              message.includes('relation') && message.includes('does not exist') ||
-              error.code === 'PGRST116'
-            );
-          }
-          return false;
-        };
-
-        if (error && isTableError(error)) {
-          console.warn('Database tables not found. Using demo mode.');
-          localStorage.setItem('supabase_invalid_key', 'true');
-        } else if (error && !isDemoMode) {
-          setErrorMessage('Failed to create setting');
-          setTimeout(() => setErrorMessage(''), 3000);
-          return;
-        }
-
-        // Create in localStorage for demo mode or if table error
-        if (isDemoMode || (error && isTableError(error))) {
-          const newSetting: Setting = {
-            id: `demo-setting-${Date.now()}`,
-            camera_id: cameraId,
-            threshold_limit: field === 'threshold_limit' ? (value as number) : 50,
-            alert_enabled: field === 'alert_enabled' ? (value as boolean) : true,
-            alert_email: field === 'alert_email' ? (value as string | null) : null,
-            alert_sound: field === 'alert_sound' ? (value as boolean) : true,
-            updated_by: user?.id || null,
-            updated_at: new Date().toISOString(),
-          };
-          const updatedSettings = [...settings, newSetting];
-          setSettings(updatedSettings);
-          localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updatedSettings));
-        } else if (!error) {
-          loadData();
-        }
+        loadData();
+      } else {
+        // Create new setting
+        localStorageService.addSetting({
+          camera_id: cameraId,
+          threshold_limit: field === 'threshold_limit' ? (value as number) : 50,
+          alert_enabled: field === 'alert_enabled' ? (value as boolean) : true,
+          alert_email: field === 'alert_email' ? (value as string | null) : null,
+          alert_sound: field === 'alert_sound' ? (value as boolean) : true,
+          updated_by: user?.id || null,
+        });
+        loadData();
       }
 
       setSaveMessage('Settings saved successfully!');

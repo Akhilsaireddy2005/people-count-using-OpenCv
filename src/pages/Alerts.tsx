@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, Check, X, Bell } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import type { Alert } from '../lib/supabase';
+import { localStorageService, type Alert } from '../lib/localStorage';
 import { useAuth } from '../hooks/useAuth';
 
 export default function Alerts() {
@@ -11,60 +10,51 @@ export default function Alerts() {
 
   useEffect(() => {
     loadAlerts();
-    const subscription = supabase
-      .channel('alerts_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, () => {
-        loadAlerts();
-      })
-      .subscribe();
+    
+    // Refresh alerts every 3 seconds
+    const interval = setInterval(() => {
+      loadAlerts();
+    }, 3000);
 
     return () => {
-      subscription.unsubscribe();
+      clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const loadAlerts = async () => {
     try {
-      let query = supabase.from('alerts').select('*').order('triggered_at', { ascending: false });
-
+      let allAlerts = localStorageService.getAlerts();
+      
+      // Sort by triggered_at descending
+      allAlerts.sort((a, b) => new Date(b.triggered_at).getTime() - new Date(a.triggered_at).getTime());
+      
       if (filter === 'unacknowledged') {
-        query = query.eq('acknowledged', false);
+        allAlerts = allAlerts.filter(alert => !alert.acknowledged);
       }
-
-      const { data } = await query;
-      if (data) {
-        setAlerts(data);
-      } else {
-        setAlerts([]);
-      }
+      
+      setAlerts(allAlerts);
     } catch (error) {
-      // Handle fetch errors gracefully in demo mode
-      console.log('Demo mode: Alerts data not available');
+      console.error('Error loading alerts:', error);
       setAlerts([]);
     }
   };
 
   const acknowledgeAlert = async (alertId: string) => {
-    const { error } = await supabase
-      .from('alerts')
-      .update({
-        acknowledged: true,
-        acknowledged_by: user?.id,
-        acknowledged_at: new Date().toISOString(),
-      })
-      .eq('id', alertId);
-
-    if (!error) {
+    const updated = localStorageService.updateAlert(alertId, {
+      acknowledged: true,
+      acknowledged_by: user?.id || null,
+      acknowledged_at: new Date().toISOString(),
+    });
+    
+    if (updated) {
       loadAlerts();
     }
   };
 
   const deleteAlert = async (alertId: string) => {
-    const { error } = await supabase.from('alerts').delete().eq('id', alertId);
-    if (!error) {
-      loadAlerts();
-    }
+    localStorageService.deleteAlert(alertId);
+    loadAlerts();
   };
 
   const formatDateTime = (dateString: string) => {

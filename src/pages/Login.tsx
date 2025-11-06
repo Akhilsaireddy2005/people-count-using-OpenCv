@@ -9,7 +9,7 @@ export default function Login() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp, user, loading: authLoading, isDemoMode } = useAuth();
+  const { signIn, signUp, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   // Redirect if already logged in
@@ -58,12 +58,6 @@ export default function Login() {
             {error && (
               <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-4 py-3 rounded-lg text-sm">
                 {error}
-              </div>
-            )}
-
-            {isDemoMode && (
-              <div className="bg-yellow-500/10 border border-yellow-500/50 text-yellow-500 px-4 py-3 rounded-lg text-sm">
-                <strong>Demo Mode:</strong> You can use any email and password to sign in.
               </div>
             )}
 
