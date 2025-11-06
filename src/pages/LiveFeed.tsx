@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { Play, Pause, Camera, Users, ArrowRight, ArrowLeft, Upload, Video } from 'lucide-react';
-import { localStorageService } from '../lib/localStorage';
+import { firebaseService } from '../lib/firebaseService';
 import { loadModel, detectPeopleWithCrossing, drawDetections, resetTracking } from '../lib/peopleDetection';
 
 type VideoSource = 'webcam' | 'upload' | 'stream';
@@ -49,7 +49,7 @@ export default function LiveFeed() {
 
   const loadCameras = async () => {
     try {
-      const cameras = localStorageService.getCameras();
+      const cameras = await firebaseService.getCameras();
       const activeCameras = cameras
         .filter(cam => cam.is_active)
         .map(cam => ({ id: cam.id, name: cam.name }));
@@ -264,13 +264,13 @@ export default function LiveFeed() {
     console.log('📦 SAVING COUNT LOG:', countLog);
 
     try {
-      localStorageService.addCountLog(countLog);
-      console.log('✅ Data saved successfully');
+      await firebaseService.addCountLog(countLog);
+      console.log('✅ Data saved to Firebase successfully');
 
       // Check for alerts
-      const setting = localStorageService.getSettingByCameraId(selectedCamera);
+      const setting = await firebaseService.getSettingByCameraId(selectedCamera);
       if (setting?.alert_enabled && currentTotal > setting.threshold_limit) {
-        localStorageService.addAlert({
+        await firebaseService.addAlert({
           camera_id: selectedCamera,
           triggered_at: new Date().toISOString(),
           count_value: currentTotal,

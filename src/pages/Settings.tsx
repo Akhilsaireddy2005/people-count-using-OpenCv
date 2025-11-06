@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { Camera, Plus, Trash2, Settings as SettingsIcon } from 'lucide-react';
-import { localStorageService, type Camera as CameraType, type Setting } from '../lib/localStorage';
+import { firebaseService, type Camera as CameraType, type Setting } from '../lib/firebaseService';
 import { useAuth } from '../hooks/useAuth';
 
 export default function Settings() {
@@ -19,8 +19,8 @@ export default function Settings() {
 
   const loadData = async () => {
     try {
-      const camerasData = localStorageService.getCameras();
-      const settingsData = localStorageService.getSettings();
+      const camerasData = await firebaseService.getCameras();
+      const settingsData = await firebaseService.getSettings();
       
       setCameras(camerasData);
       setSettings(settingsData);
@@ -45,7 +45,7 @@ export default function Settings() {
     }
 
     try {
-      const newCamera = localStorageService.addCamera({
+      const newCamera = await firebaseService.addCamera({
         name: newCameraName.trim(),
         location: newCameraLocation.trim(),
         stream_url: null,
@@ -54,7 +54,7 @@ export default function Settings() {
       });
 
       // Create default settings
-      localStorageService.addSetting({
+      await firebaseService.addSetting({
         camera_id: newCamera.id,
         threshold_limit: 50,
         alert_enabled: true,
@@ -76,7 +76,7 @@ export default function Settings() {
 
   const deleteCamera = async (cameraId: string) => {
     try {
-      localStorageService.deleteCamera(cameraId);
+      await firebaseService.deleteCamera(cameraId);
       loadData();
     } catch (error) {
       console.error('Error deleting camera:', error);
@@ -89,14 +89,14 @@ export default function Settings() {
       const existingSetting = settings.find((s) => s.camera_id === cameraId);
 
       if (existingSetting) {
-        localStorageService.updateSetting(existingSetting.id, {
+        await firebaseService.updateSetting(existingSetting.id, {
           [field]: value,
           updated_by: user?.id || null,
         });
         loadData();
       } else {
         // Create new setting
-        localStorageService.addSetting({
+        await firebaseService.addSetting({
           camera_id: cameraId,
           threshold_limit: field === 'threshold_limit' ? (value as number) : 50,
           alert_enabled: field === 'alert_enabled' ? (value as boolean) : true,

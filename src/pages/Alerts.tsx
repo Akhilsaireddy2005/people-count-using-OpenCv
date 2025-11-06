@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, Check, X, Bell } from 'lucide-react';
-import { localStorageService, type Alert } from '../lib/localStorage';
+import { firebaseService, type Alert } from '../lib/firebaseService';
 import { useAuth } from '../hooks/useAuth';
 
 export default function Alerts() {
@@ -11,23 +11,23 @@ export default function Alerts() {
   useEffect(() => {
     loadAlerts();
     
-    // Refresh alerts every 3 seconds
-    const interval = setInterval(() => {
-      loadAlerts();
-    }, 3000);
+    // Set up real-time listener
+    const unsubscribe = firebaseService.onAlertsChange((updatedAlerts) => {
+      const filtered = filter === 'unacknowledged' 
+        ? updatedAlerts.filter(alert => !alert.acknowledged)
+        : updatedAlerts;
+      setAlerts(filtered);
+    });
 
     return () => {
-      clearInterval(interval);
+      unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   const loadAlerts = async () => {
     try {
-      let allAlerts = localStorageService.getAlerts();
-      
-      // Sort by triggered_at descending
-      allAlerts.sort((a, b) => new Date(b.triggered_at).getTime() - new Date(a.triggered_at).getTime());
+      let allAlerts = await firebaseService.getAlerts();
       
       if (filter === 'unacknowledged') {
         allAlerts = allAlerts.filter(alert => !alert.acknowledged);
@@ -41,7 +41,7 @@ export default function Alerts() {
   };
 
   const acknowledgeAlert = async (alertId: string) => {
-    const updated = localStorageService.updateAlert(alertId, {
+    const updated = await firebaseService.updateAlert(alertId, {
       acknowledged: true,
       acknowledged_by: user?.id || null,
       acknowledged_at: new Date().toISOString(),
@@ -53,7 +53,7 @@ export default function Alerts() {
   };
 
   const deleteAlert = async (alertId: string) => {
-    localStorageService.deleteAlert(alertId);
+    await firebaseService.deleteAlert(alertId);
     loadAlerts();
   };
 

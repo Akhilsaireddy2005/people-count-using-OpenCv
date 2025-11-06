@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { TrendingUp, Users, Calendar, Download } from 'lucide-react';
-import { localStorageService, type CountLog } from '../lib/localStorage';
+import { firebaseService, type CountLog } from '../lib/firebaseService';
 
 type ChartData = {
   time: string;
@@ -18,24 +18,24 @@ export default function Analytics() {
   const [avgCount, setAvgCount] = useState(0);
 
   useEffect(() => {
-    console.log('📊 Analytics: Component mounted, starting auto-refresh');
+    console.log('📊 Analytics: Component mounted, setting up real-time listener');
     loadAnalytics();
     
-    // Refresh data every 3 seconds
-    const refreshInterval = setInterval(() => {
-      console.log('⏰ Analytics: Auto-refresh triggered (3-second interval)');
+    // Set up real-time listener for count logs
+    const unsubscribe = firebaseService.onCountLogsChange(() => {
+      console.log('📊 Analytics: Data changed, reloading...');
       loadAnalytics();
-    }, 3000);
+    });
 
     return () => {
       console.log('📊 Analytics: Component unmounting, cleaning up');
-      clearInterval(refreshInterval);
+      unsubscribe();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeRange]);
 
   const loadAnalytics = async () => {
-    console.log('🔍 Analytics: Loading data...');
+    console.log('🔍 Analytics: Loading data from Firebase...');
     try {
       const now = new Date();
       let startTime: Date;
@@ -52,8 +52,8 @@ export default function Analytics() {
           break;
       }
 
-      // Get all logs from localStorage
-      const allLogs = localStorageService.getCountLogs();
+      // Get all logs from Firebase
+      const allLogs = await firebaseService.getCountLogs();
       const filteredLogs = allLogs.filter((log) => new Date(log.timestamp) >= startTime);
       console.log(`✅ Using ${filteredLogs.length} logs for time range: ${timeRange}`);
       processData(filteredLogs);
