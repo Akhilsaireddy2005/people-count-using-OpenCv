@@ -66,25 +66,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
-      // Send email verification with action URL
-      const actionCodeSettings = {
-        url: 'https://people-counter-app-aec5b.web.app/login',
-        handleCodeInApp: false,
-      };
-      
-      await sendEmailVerification(userCredential.user, actionCodeSettings);
+      // Send email verification
+      await sendEmailVerification(userCredential.user);
       
       // Sign out the user immediately after signup
       await firebaseSignOut(auth);
       
-      // Don't set user state - they need to verify email first
-      throw new Error('Account created! Please check your email and verify your account before signing in.');
+      // Throw success message that will be caught and displayed
+      const successError = new Error('Account created! Please check your email and verify your account before signing in.');
+      (successError as any).isSuccess = true;
+      throw successError;
     } catch (error: any) {
-      console.error('Sign up error:', error);
-      // If account was created but email failed to send
-      if (error.code === 'auth/email-already-in-use') {
-        throw new Error('This email is already registered. Please sign in or use forgot password.');
+      // If it's our success message, re-throw it as-is
+      if (error.isSuccess) {
+        throw error;
       }
+      console.error('Sign up error:', error);
       throw new Error(error.message || 'Failed to sign up');
     }
   };
